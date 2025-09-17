@@ -43,7 +43,18 @@ else:
 
 APP_DIR = Path(os.path.abspath(os.path.dirname(__file__)))
 VENV_DIR = APP_DIR / ".venv"
-LOG_FILE = APP_DIR / "spotdl_gui.log"
+# Prefer a writable per-user log folder on Windows
+_local = os.getenv("LOCALAPPDATA")
+if _local:
+    LOG_DIR = Path(_local) / "SpotDL-GUI"
+else:
+    LOG_DIR = APP_DIR
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_FILE = LOG_DIR / "spotdl_gui.log"
+except Exception:
+    # Fallback to script folder if LocalAppData is blocked
+    LOG_FILE = APP_DIR / "spotdl_gui.log"
 
 # --- Logging (works before Tk) ---
 logger = logging.getLogger("spotdl_gui")
@@ -52,6 +63,15 @@ _handler = RotatingFileHandler(LOG_FILE, maxBytes=512_000, backupCount=2, encodi
 _handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
 logger.addHandler(_handler)
 logger.info("=== App start ===")
+logger.info(f"Logging to: {LOG_FILE}")
+# Let Windows users know where the log is, since double-clicking uses pythonw (no console)
+try:
+    if IS_WINDOWS:
+        _win_message_box(f"SpotDL GUI started.
+Log file:
+{LOG_FILE}")
+except Exception:
+    pass
 
 # Defer Tk imports until after we set up logging
 import tkinter as tk
