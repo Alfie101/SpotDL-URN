@@ -141,7 +141,7 @@ class SpotDLGUI(tk.Tk):
             while True:
                 msg = self.log_queue.get_nowait()
                 self.log_text.configure(state=tk.NORMAL)
-                self.log_text.insert(tk.END, msg + '')
+                self.log_text.insert(tk.END, msg)
                 self.log_text.see(tk.END)
                 self.log_text.configure(state=tk.DISABLED)
         except queue.Empty:
