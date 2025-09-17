@@ -189,8 +189,7 @@ class App(tk.Tk):
             if rc == 0:
                 self.log('Done. Files at: ' + str(out_dir))
                 self.status.configure(text='Done')
-                messagebox.showinfo('Complete', 'Finished. Files are in:
-' + str(out_dir))
+                messagebox.showinfo('Complete', 'Finished. Files are in: \n' + str(out_dir))
             else:
                 self.log('spotDL exited with code ' + str(rc))
                 self.status.configure(text='Failed')
@@ -252,8 +251,7 @@ class App(tk.Tk):
         except Exception:
             tail = '(no last_run.log)'
         try:
-            messagebox.showerror('Failed', 'spotDL failed. Last output:
-' + tail)
+            messagebox.showerror('Failed', 'spotDL failed. Last output:\n' + tail)
         except Exception:
             pass
 
