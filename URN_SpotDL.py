@@ -103,7 +103,7 @@ class SpotDLGUI(tk.Tk):
 
         opt_row = ttk.Frame(main)
         opt_row.pack(fill=tk.X, pady=(pad, 0))
-        self.threads_var = tk.IntVar(value=max(2, os.cpu_count() or 2))
+        self.threads_var = tk.IntVar(value=3)
         ttk.Label(opt_row, text='Threads:').pack(side=tk.LEFT)
         ttk.Spinbox(opt_row, from_=1, to=max(32, self.threads_var.get()), textvariable=self.threads_var, width=5).pack(side=tk.LEFT)
         self.overwrite_mode = tk.StringVar(value='skip')
@@ -114,6 +114,8 @@ class SpotDLGUI(tk.Tk):
         btn_row.pack(fill=tk.X, pady=(pad, 0))
         self.download_btn = ttk.Button(btn_row, text='Download', command=self._on_download)
         self.download_btn.pack(side=tk.LEFT)
+        self.diag_btn = ttk.Button(btn_row, text='Open log', command=self._open_last_log)
+        self.diag_btn.pack(side=tk.LEFT, padx=(8, 0))
         self.stop_btn = ttk.Button(btn_row, text='Stop', command=self._on_stop, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=(pad, 0))
         self.status_lbl = ttk.Label(btn_row, text='Idle')
@@ -142,7 +144,8 @@ class SpotDLGUI(tk.Tk):
             while True:
                 msg = self.log_queue.get_nowait()
                 self.log_text.configure(state=tk.NORMAL)
-                self.log_text.insert(tk.END, msg + '\n')
+                self.log_text.insert(tk.END, msg + '
+')
                 self.log_text.see(tk.END)
                 self.log_text.configure(state=tk.DISABLED)
         except queue.Empty:
@@ -204,7 +207,8 @@ class SpotDLGUI(tk.Tk):
                 '--output', str(out_dir),
                 '--threads', str(self.threads_var.get()),
                 '--overwrite', self.overwrite_mode.get(),
-                '--preload'
+                '--preload',
+                '--log-level', 'DEBUG'
             ]
 
             env = os.environ.copy()
@@ -215,6 +219,11 @@ class SpotDLGUI(tk.Tk):
             self.log('Running: ' + ' '.join(cmd))
 
             creationflags = 0x08000000 if IS_WINDOWS else 0
+            # Write full raw output to a file for troubleshooting
+            self.last_run = APP_DIR / 'last_run.log'
+            last_run = self.last_run
+            self.log('Full output will be saved to: ' + str(last_run))
+
             self.proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -226,10 +235,16 @@ class SpotDLGUI(tk.Tk):
             )
 
             assert self.proc.stdout is not None
-            for line in self.proc.stdout:
-                self.log(line.rstrip())
-                if self.stop_flag.is_set():
-                    break
+            with open(last_run, 'w', encoding='utf-8', errors='ignore') as lf:
+                for line in self.proc.stdout:
+                    line = line.rstrip('
+')
+                    lf.write(line + '
+')
+                    lf.flush()
+                    self.log(line)
+                    if self.stop_flag.is_set():
+                        break
 
             ret = self.proc.wait()
             if self.stop_flag.is_set():
@@ -240,11 +255,25 @@ class SpotDLGUI(tk.Tk):
             if ret == 0:
                 self.log('Done! Files saved to: ' + str(out_dir))
                 self.status_lbl.configure(text='Done')
-                messagebox.showinfo('Download complete', 'Finished. Files are in:\n' + str(out_dir))
+                messagebox.showinfo('Download complete', 'Finished. Files are in:
+' + str(out_dir))
             else:
                 self.log('spotDL exited with code ' + str(ret))
                 self.status_lbl.configure(text='Failed')
-                messagebox.showerror('Failed', 'spotDL failed. Check the log for details.')
+                tail = ''
+                try:
+                    with open(self.last_run, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()[-60:]
+                        tail = ''.join(lines)
+                except Exception:
+                    tail = '(could not read last_run.log)'
+                try:
+                    messagebox.showerror('Failed', 'spotDL exited with code ' + str(ret) + '
+
+Last output (tail):
+' + tail)
+                except Exception:
+                    _win_message_box('spotDL failed. See last_run.log for details.')
         except Exception as e:
             logger.exception('Worker crashed')
             self.log('Error: ' + str(e))
@@ -255,6 +284,20 @@ class SpotDLGUI(tk.Tk):
                 _win_message_box('SpotDL GUI error: ' + str(e))
         finally:
             self._reset_ui_done()
+
+    def _open_last_log(self):
+        target = getattr(self, 'last_run', APP_DIR / 'last_run.log')
+        if IS_WINDOWS:
+            try:
+                os.startfile(str(target))  # type: ignore[attr-defined]
+                return
+            except Exception:
+                pass
+        try:
+            subprocess.Popen(['notepad', str(target)])
+        except Exception:
+            messagebox.showinfo('Open log', f'Open this file manually:
+{target}')
 
     def _reset_ui_done(self, error=False):
         try:
@@ -274,8 +317,8 @@ class SpotDLGUI(tk.Tk):
             venv.create(str(VENV_DIR), with_pip=True)
         self.log('Upgrading pip…')
         subprocess.check_call([str(_venv_python()), '-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools'])
-        self.log('Installing/Updating dependencies (spotdl, imageio-ffmpeg)…')
-        subprocess.check_call([str(_venv_pip()), 'install', '--upgrade', 'spotdl', 'imageio-ffmpeg'])
+        self.log('Installing/Updating dependencies (spotdl, imageio-ffmpeg, yt-dlp)…')
+        subprocess.check_call([str(_venv_pip()), 'install', '--upgrade', 'spotdl', 'imageio-ffmpeg', 'yt-dlp'])
 
     def _get_ffmpeg_dir_from_venv(self):
         code = 'import os, imageio_ffmpeg; p=imageio_ffmpeg.get_ffmpeg_exe(); print(os.path.dirname(p))'
@@ -283,6 +326,13 @@ class SpotDLGUI(tk.Tk):
             out = subprocess.check_output([str(_venv_python()), '-c', code], text=True).strip()
             if out:
                 self.log('FFmpeg located at: ' + out)
+            # verify ffmpeg runs
+            test_env = os.environ.copy()
+            test_env['PATH'] = os.pathsep.join([out, test_env.get('PATH', '')])
+            try:
+                subprocess.check_output(['ffmpeg', '-version'], env=test_env, text=True, stderr=subprocess.STDOUT)
+            except Exception as e:
+                self.log('FFmpeg sanity check failed: ' + str(e))
             return out
         except Exception as e:
             self.log('FFmpeg detection failed: ' + str(e))
@@ -292,6 +342,7 @@ class SpotDLGUI(tk.Tk):
 def main():
     app = SpotDLGUI()
     app.log('Reminder: Only download content you have the rights to.')
+    app.log('If something fails, open last_run.log in the app folder for the full trace.')
     app.mainloop()
 
 
@@ -303,5 +354,6 @@ if __name__ == '__main__':
         try:
             messagebox.showerror('SpotDL GUI crashed', str(e))
         except Exception:
-            _win_message_box('SpotDL GUI failed to start:\n' + str(e))
+            _win_message_box('SpotDL GUI failed to start:
+' + str(e))
         raise
