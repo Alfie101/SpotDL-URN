@@ -102,8 +102,7 @@ class App(tk.Tk):
             while True:
                 s = self.q.get_nowait()
                 self.txt.configure(state=tk.NORMAL)
-                self.txt.insert(tk.END, s + '
-')
+                self.txt.insert(tk.END, s + "\n")
                 self.txt.see(tk.END)
                 self.txt.configure(state=tk.DISABLED)
         except queue.Empty:
