@@ -1,34 +1,26 @@
 def _ffmpeg_dir(self):
-    """
-    Return a directory that contains a working ffmpeg executable.
-    Order:
-      1) imageio-ffmpeg managed binary (if installed)
-      2) system ffmpeg found via PATH (shutil.which)
-    """
-    # 1) Try imageio-ffmpeg
-    code = (
-        'import os, imageio_ffmpeg; '
-        'p=imageio_ffmpeg.get_ffmpeg_exe(); '
-        'print(os.path.dirname(p))' )
+    # Try imageio-ffmpeg inside the venv first
+    code = "import os, imageio_ffmpeg; p=imageio_ffmpeg.get_ffmpeg_exe(); print(os.path.dirname(p))"
     try:
-        out = subprocess.check_output([str(venv_python()), '-c', code], text=True).strip()
-        if out and Path(out, 'ffmpeg.exe' if IS_WINDOWS else 'ffmpeg').exists():
-            self.log('FFmpeg (imageio) at: ' + out)
+        out = subprocess.check_output([str(venv_python()), "-c", code], text=True).strip()
+        exe_name = "ffmpeg.exe" if IS_WINDOWS else "ffmpeg"
+        if out and Path(out, exe_name).exists():
+            self.log("FFmpeg (imageio) at: " + out)
             return out
     except Exception as e:
-        self.log('imageio-ffmpeg not available: ' + str(e))
+        self.log("imageio-ffmpeg not available: " + str(e))
 
-    # 2) Fallback: system ffmpeg on PATH
-    exe_name = 'ffmpeg.exe' if IS_WINDOWS else 'ffmpeg'
+    # Fallback: system ffmpeg found on PATH
+    exe_name = "ffmpeg.exe" if IS_WINDOWS else "ffmpeg"
     sys_ffmpeg = shutil.which(exe_name)
     if sys_ffmpeg:
         ff_dir = str(Path(sys_ffmpeg).parent)
-        self.log('FFmpeg (system PATH) at: ' + ff_dir)
-        # quick sanity check
+        self.log("FFmpeg (system PATH) at: " + ff_dir)
         try:
-            subprocess.check_call([sys_ffmpeg, '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.check_call([sys_ffmpeg, "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return ff_dir
         except Exception as e:
-            self.log('FFmpeg on PATH failed -version check: ' + str(e))
+            self.log("FFmpeg on PATH failed -version check: " + str(e))
 
-    return ''
+    # Not found
+    return ""
