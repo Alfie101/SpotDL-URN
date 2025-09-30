@@ -44,25 +44,39 @@ def venv_spotdl():
 
 def _load_spotify_env_from_file():
     """
-    Read key=value lines from APP_DIR/spotdl.env and return a dict of env vars.
-    Lines starting with # are ignored. Whitespace around keys/values is trimmed.
+    Read key=value lines from APP_DIR/spotdl.env (or .env) and return a dict.
+    - Ignores blank lines and comments (# ...)
+    - Trims whitespace and surrounding single/double quotes
     """
-    env_path = APP_DIR / 'spotdl.env'
+    def _strip_quotes(s: str) -> str:
+        s = s.strip()
+        if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
+            return s[1:-1]
+        return s
+
+    # Look for spotdl.env first, then .env as a fallback
+    candidates = [APP_DIR / 'spotdl.env', APP_DIR / '.env']
+
     out = {}
-    try:
-        if env_path.exists():
-            with open(env_path, 'r', encoding='utf-8') as f:
-                for raw in f:
-                    line = raw.strip()
-                    if not line or line.startswith('#') or '=' not in line:
-                        continue
-                    k, v = line.split('=', 1)
-                    out[k].strip()
-                    out[k.strip()] = v.strip()
-    except Exception:
-        # Don’t crash the app if the file is malformed
-        pass
+    for env_path in candidates:
+        try:
+            if env_path.exists():
+                with open(env_path, 'r', encoding='utf-8-sig') as f:
+                    for raw in f:
+                        line = raw.strip()
+                        if not line or line.startswith('#') or '=' not in line:
+                            continue
+                        k, v = line.split('=', 1)
+                        k = _strip_quotes(k)
+                        v = _strip_quotes(v)
+                        out[k] = v
+                # stop at the first file found
+                return out
+        except Exception:
+            # do not crash on malformed lines
+            pass
     return out
+
 
 # ---------- GUI APP ----------
 
