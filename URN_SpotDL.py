@@ -33,6 +33,29 @@ def venv_pip():
 def venv_spotdl():
     return VENV_DIR / ('Scripts/spotdl.exe' if IS_WINDOWS else 'bin/spotdl')
 
+# ---------- GET API CREDS ----------
+
+def _load_spotify_env_from_file():
+    """
+    Read key=value lines from APP_DIR/spotdl.env and return a dict of env vars.
+    Lines starting with # are ignored. Whitespace around keys/values is trimmed.
+    """
+    env_path = APP_DIR / 'spotdl.env'
+    out = {}
+    try:
+        if env_path.exists():
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    k, v = line.split('=', 1)
+                    out[k.strip()] = v.strip()
+    except Exception:
+        # Don’t crash the app if the file is malformed
+        pass
+    return out
+
 # ---------- GUI APP ----------
 
 class App(tk.Tk):
@@ -159,6 +182,13 @@ class App(tk.Tk):
 
             env = os.environ.copy()
             env['PATH'] = os.pathsep.join([ffmpeg_dir, str(exe.parent), env.get('PATH', '')])
+
+            spot_env = _load_spotify_env_from_file()
+            # Only set if not already set (lets Windows/global env override if you want)
+            for k in ('SPOTIPY_CLIENT_ID', 'SPOTIPY_CLIENT_SECRET', 'SPOTIPY_REDIRECT_URI'):
+            if k in spot_env and not env.get(k):
+            env[k] = spot_env[k]
+            
             self.status.configure(text='Downloading...')
             self.log('Running: ' + ' '.join(cmd))
 
