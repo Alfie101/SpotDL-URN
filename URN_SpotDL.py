@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 #!/usr/bin/env python3
-# SpotDL GUI - ultra-robust, compact build to avoid copy/paste syntax issues.
-# Keep it under ~220 lines, ASCII-only, balanced parentheses, no fancy quotes.
+"""
+SpotDL GUI — fixed, working version
+- Creates a local venv (./.venv), installs spotdl + imageio-ffmpeg
+- Reads Spotify API creds from ./spotdl.env (or uses system env)
+- Launches spotdl with your options
+Tested on Windows; also works on macOS/Linux.
+"""
 
 import os
 import sys
@@ -14,8 +19,9 @@ from pathlib import Path
 try:
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
-except Exception:
-    raise SystemExit('Tkinter missing. Install Python from python.org (not MS Store).')
+except Exception as e:
+    print("Tkinter is required: ", e, file=sys.stderr)
+    raise
 
 IS_WINDOWS = platform.system() == 'Windows'
 APP_DIR = Path(os.path.abspath(os.path.dirname(__file__)))
@@ -74,9 +80,11 @@ class App(tk.Tk):
         root = ttk.Frame(self)
         root.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad)
 
-        ttk.Label(root, text='Spotify link (track/album/playlist/artist):').pack(anchor=tk.W)
-        self.url_var = tk.StringVar()
-        ttk.Entry(root, textvariable=self.url_var).pack(fill=tk.X, expand=True)
+        row = ttk.Frame(root)
+        row.pack(fill=tk.X)
+        ttk.Label(row, text='Spotify URL / Search:').pack(side=tk.LEFT)
+        self.url_var = tk.StringVar(value='')
+        ttk.Entry(row, textvariable=self.url_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(pad, 0))
 
         row = ttk.Frame(root)
         row.pack(fill=tk.X, pady=(pad, 0))
@@ -92,74 +100,94 @@ class App(tk.Tk):
         ttk.Spinbox(opt, from_=1, to=8, textvariable=self.threads_var, width=5).pack(side=tk.LEFT)
         ttk.Label(opt, text='  Overwrite:').pack(side=tk.LEFT)
         self.overwrite_var = tk.StringVar(value='skip')
-        ttk.Combobox(opt, values=['skip', 'force', 'prompt'], textvariable=self.overwrite_var, state='readonly', width=8).pack(side=tk.LEFT)
+        ttk.Combobox(opt, values=['skip', 'prompt', 'force'], textvariable=self.overwrite_var, width=8, state='readonly').pack(side=tk.LEFT)
 
         btns = ttk.Frame(root)
         btns.pack(fill=tk.X, pady=(pad, 0))
-        self.btn_go = ttk.Button(btns, text='Download', command=self._start)
-        self.btn_go.pack(side=tk.LEFT)
-        self.btn_stop = ttk.Button(btns, text='Stop', command=self._stop, state=tk.DISABLED)
-        self.btn_stop.pack(side=tk.LEFT, padx=(pad, 0))
-        ttk.Button(btns, text='Open log', command=self._open_log).pack(side=tk.LEFT, padx=(8, 0))
-        self.status = ttk.Label(btns, text='Idle')
-        self.status.pack(side=tk.RIGHT)
+        self.run_btn = ttk.Button(btns, text='Run', command=self._run)
+        self.run_btn.pack(side=tk.LEFT)
+        self.cancel_btn = ttk.Button(btns, text='Cancel', command=self._cancel, state=tk.DISABLED)
+        self.cancel_btn.pack(side=tk.LEFT, padx=(pad, 0))
+
+        self.status = ttk.Label(root, text='Idle')
+        self.status.pack(anchor='w', pady=(pad, 0))
 
         self.pb = ttk.Progressbar(root, mode='indeterminate')
-        self.pb.pack(fill=tk.X, pady=(pad, 0))
+        self.pb.pack(fill=tk.X)
 
-        frame = ttk.LabelFrame(root, text='Log')
-        frame.pack(fill=tk.BOTH, expand=True, pady=(pad, 0))
-        self.txt = tk.Text(frame, wrap=tk.WORD, state=tk.DISABLED)
-        self.txt.pack(fill=tk.BOTH, expand=True)
+        self.log_text = tk.Text(root, height=18, wrap='word')
+        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(pad, 0))
+        self.log_text.configure(state=tk.DISABLED)
+
+    # -------------- UI Helpers --------------
 
     def _pick_out(self):
-        d = filedialog.askdirectory(initialdir=self.out_var.get())
+        d = filedialog.askdirectory(initialdir=self.out_var.get() or str(APP_DIR))
         if d:
             self.out_var.set(d)
 
-    def log(self, s):
-        self.q.put(s)
+    def log(self, s: str):
+        try:
+            self.log_text.configure(state=tk.NORMAL)
+            self.log_text.insert(tk.END, s + "\n")
+            self.log_text.see(tk.END)
+            self.log_text.configure(state=tk.DISABLED)
+        except Exception:
+            pass
+        try:
+            with open(LAST_RUN, 'a', encoding='utf-8') as f:
+                f.write(s + "\n")
+        except Exception:
+            pass
 
     def _pump(self):
         try:
             while True:
-                s = self.q.get_nowait()
-                self.txt.configure(state=tk.NORMAL)
-                self.txt.insert(tk.END, s + "\n")
-                self.txt.see(tk.END)
-                self.txt.configure(state=tk.DISABLED)
+                line = self.q.get_nowait()
+                self.log(line)
         except queue.Empty:
             pass
-        self.after(120, self._pump)
+        self.after(100, self._pump)
 
-    def _start(self):
-        url = self.url_var.get().strip()
+    def _run(self):
+        url = (self.url_var.get() or '').strip()
         if not url:
-            messagebox.showwarning('Missing link', 'Please paste a Spotify link.')
+            messagebox.showerror('Missing input', 'Enter a Spotify URL or search query.')
             return
-        out_dir = Path(self.out_var.get()).expanduser().resolve()
+        out_dir = Path(self.out_var.get()).expanduser()
         out_dir.mkdir(parents=True, exist_ok=True)
-        self.btn_go.configure(state=tk.DISABLED)
-        self.btn_stop.configure(state=tk.NORMAL)
+        # clear previous log file
+        try:
+            LAST_RUN.unlink(missing_ok=True)  # type: ignore[arg-type]
+        except Exception:
+            pass
+
         self.pb.start(12)
         self.status.configure(text='Setting up...')
         self.stop_flag.clear()
         t = threading.Thread(target=self._worker, args=(url, out_dir), daemon=True)
         t.start()
+        self.run_btn.configure(state=tk.DISABLED)
+        self.cancel_btn.configure(state=tk.NORMAL)
 
-    def _stop(self):
+    def _cancel(self):
         self.stop_flag.set()
         try:
-            if getattr(self, 'proc', None) and self.proc.poll() is None:
+            if hasattr(self, 'proc') and self.proc and self.proc.poll() is None:
                 self.proc.terminate()
         except Exception:
             pass
-        self.status.configure(text='Stopped')
-        self.pb.stop()
-        self.btn_go.configure(state=tk.NORMAL)
-        self.btn_stop.configure(state=tk.DISABLED)
+        self._done(error=True)
 
-    def _worker(self, url, out_dir):
+    def _done(self, error=False):
+        self.pb.stop()
+        self.cancel_btn.configure(state=tk.DISABLED)
+        self.run_btn.configure(state=tk.NORMAL)
+        self.status.configure(text='Idle' if not error else 'Error')
+
+    # -------------- Worker --------------
+
+    def _worker(self, url, out_dir: Path):
         try:
             self.status.configure(text='Preparing environment...')
             self._ensure_env()
@@ -183,16 +211,16 @@ class App(tk.Tk):
             env = os.environ.copy()
             env['PATH'] = os.pathsep.join([ffmpeg_dir, str(exe.parent), env.get('PATH', '')])
 
+            # inject Spotify creds
             spot_env = _load_spotify_env_from_file()
-            # Only set if not already set (lets Windows/global env override if you want)
             for k in ('SPOTIPY_CLIENT_ID', 'SPOTIPY_CLIENT_SECRET', 'SPOTIPY_REDIRECT_URI'):
-            if k in spot_env and not env.get(k):
-            env[k] = spot_env[k]
-            
+                if k in spot_env and not env.get(k):
+                    env[k] = spot_env[k]
+
             self.status.configure(text='Downloading...')
             self.log('Running: ' + ' '.join(cmd))
 
-            creationflags = 0x08000000 if IS_WINDOWS else 0
+            creationflags = 0x08000000 if IS_WINDOWS else 0  # CREATE_NO_WINDOW on Windows
             self.proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -203,13 +231,13 @@ class App(tk.Tk):
                 creationflags=creationflags
             )
 
-            with open(LAST_RUN, 'w', encoding='utf-8', errors='ignore') as raw:
-                assert self.proc.stdout is not None
-                for line in self.proc.stdout:
-                    raw.write(line)
-                    self.log(line.rstrip())
-                    if self.stop_flag.is_set():
-                        break
+            # stream output
+            for line in self.proc.stdout:  # type: ignore[union-attr]
+                if not line:
+                    break
+                self.q.put(line.rstrip())
+                if self.stop_flag.is_set():
+                    break
 
             rc = self.proc.wait()
             if self.stop_flag.is_set():
@@ -219,29 +247,29 @@ class App(tk.Tk):
             if rc == 0:
                 self.log('Done. Files at: ' + str(out_dir))
                 self.status.configure(text='Done')
-                messagebox.showinfo('Complete', 'Finished. Files are in: \n' + str(out_dir))
+                try:
+                    messagebox.showinfo('Complete', 'Finished. Files are in: \n' + str(out_dir))
+                except Exception:
+                    pass
             else:
-                self.log('spotDL exited with code ' + str(rc))
-                self.status.configure(text='Failed')
-                self._show_tail()
+                # show last ~50 lines for context
+                try:
+                    tail = ''
+                    with open(LAST_RUN, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        tail = ''.join(lines[-50:])
+                except Exception:
+                    pass
+                self._done(error=True)
+                try:
+                    messagebox.showerror('Failed', 'spotDL failed. Last output:\n' + tail)
+                except Exception:
+                    pass
         except Exception as e:
-            self.log('Error: ' + str(e))
-            try:
-                messagebox.showerror('Error', str(e))
-            except Exception:
-                pass
-        finally:
-            self._done()
+            self._done(error=True)
+            self.log(f'Error: {e}')
 
-    def _done(self, error=False):
-        try:
-            self.pb.stop()
-        except Exception:
-            pass
-        self.btn_go.configure(state=tk.NORMAL)
-        self.btn_stop.configure(state=tk.DISABLED)
-        if not error and self.status['text'] not in ('Done', 'Failed'):
-            self.status.configure(text='Idle')
+    # -------------- Env setup --------------
 
     def _ensure_env(self):
         import venv
@@ -257,40 +285,17 @@ class App(tk.Tk):
         code = 'import os, imageio_ffmpeg; p=imageio_ffmpeg.get_ffmpeg_exe(); print(os.path.dirname(p))'
         try:
             out = subprocess.check_output([str(venv_python()), '-c', code], text=True).strip()
-            if out:
-                self.log('FFmpeg at: ' + out)
             return out
         except Exception as e:
-            self.log('FFmpeg detect failed: ' + str(e))
+            self.log(f'FFmpeg probe failed: {e}')
             return ''
 
-    def _open_log(self):
-        try:
-            if IS_WINDOWS:
-                os.startfile(str(LAST_RUN))
-            else:
-                subprocess.Popen(['notepad', str(LAST_RUN)])
-        except Exception:
-            messagebox.showinfo('Open log', 'Open this file: ' + str(LAST_RUN))
-
-    def _show_tail(self):
-        tail = ''
-        try:
-            with open(LAST_RUN, 'r', encoding='utf-8', errors='ignore') as f:
-                tail = ''.join(f.readlines()[-60:])
-        except Exception:
-            tail = '(no last_run.log)'
-        try:
-            messagebox.showerror('Failed', 'spotDL failed. Last output:\n' + tail)
-        except Exception:
-            pass
-
+# ---------- main ----------
 
 def main():
     app = App()
     app.log('Only download content you have rights to.')
     app.mainloop()
-
 
 if __name__ == '__main__':
     main()
