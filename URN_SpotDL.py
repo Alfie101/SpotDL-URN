@@ -217,7 +217,7 @@ class App(tk.Tk):
                 '--threads', str(self.threads_var.get()),
                 '--overwrite', self.overwrite_var.get(),
                 '--preload',
-                '--log-level', 'debug',
+                '--log-level', 'INFO',
             ]
 
             env = os.environ.copy()
