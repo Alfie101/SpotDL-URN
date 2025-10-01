@@ -236,25 +236,26 @@ class App(tk.Tk):
             env = os.environ.copy()
             env['PATH'] = os.pathsep.join([ffmpeg_dir, str(exe.parent), env.get('PATH', '')])
 
-          # inject Spotify creds (force from spotdl.env/.env if present)
-spot_env = _load_spotify_env_from_file()
-for k in ('SPOTIPY_CLIENT_ID', 'SPOTIPY_CLIENT_SECRET', 'SPOTIPY_REDIRECT_URI'):
-    if k in spot_env:
-        env[k] = spot_env[k]
+                      # inject Spotify creds (force from spotdl.env/.env if present)
+            spot_env = _load_spotify_env_from_file()
+            for k in ('SPOTIPY_CLIENT_ID', 'SPOTIPY_CLIENT_SECRET', 'SPOTIPY_REDIRECT_URI'):
+                if k in spot_env:
+                    env[k] = spot_env[k]
 
-# show the command
-self.log('Running: ' + ' '.join(cmd))
+            # show the command
+            self.log('Running: ' + ' '.join(cmd))
 
-# masked confirmation
-def _mask(v):
-    if not v:
-        return '<missing>'
-    v = str(v)
-    return (v[:3] + '...' + v[-3:]) if len(v) > 6 else (v[0] + '***' + v[-1])
+            # masked confirmation
+            def _mask(v):
+                if not v:
+                    return '<missing>'
+                v = str(v)
+                return (v[:3] + '...' + v[-3:]) if len(v) > 6 else (v[0] + '***' + v[-1])
 
-self.log('SPOTIPY_CLIENT_ID = ' + _mask(env.get('SPOTIPY_CLIENT_ID')))
-self.log('SPOTIPY_CLIENT_SECRET = ' + ('present' if env.get('SPOTIPY_CLIENT_SECRET') else '<missing>'))
-self.log('SPOTIPY_REDIRECT_URI = ' + (env.get('SPOTIPY_REDIRECT_URI') or '<missing>'))
+            self.log('SPOTIPY_CLIENT_ID = ' + _mask(env.get('SPOTIPY_CLIENT_ID')))
+            self.log('SPOTIPY_CLIENT_SECRET = ' + ('present' if env.get('SPOTIPY_CLIENT_SECRET') else '<missing>'))
+            self.log('SPOTIPY_REDIRECT_URI = ' + (env.get('SPOTIPY_REDIRECT_URI') or '<missing>'))
+
 
             # stream output
             for line in self.proc.stdout:  # type: ignore[union-attr]
