@@ -45,22 +45,21 @@ def venv_spotdl():
 def _load_spotify_env_from_file():
     """
     Read key=value lines from APP_DIR/spotdl.env (or .env) and return a dict.
-    - Ignores blank lines and comments (# ...)
-    - Trims whitespace and surrounding single/double quotes
+    Robust to BOMs, quotes, blank lines, and comments.
     """
     def _strip_quotes(s: str) -> str:
         s = s.strip()
-        if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
+        if (len(s) >= 2) and ((s[0] == s[-1]) and s[0] in ("'", '"')):
             return s[1:-1]
         return s
 
-    # Look for spotdl.env first, then .env as a fallback
     candidates = [APP_DIR / 'spotdl.env', APP_DIR / '.env']
-
     out = {}
+
     for env_path in candidates:
         try:
             if env_path.exists():
+                # utf-8-sig handles BOM if present
                 with open(env_path, 'r', encoding='utf-8-sig') as f:
                     for raw in f:
                         line = raw.strip()
@@ -73,7 +72,7 @@ def _load_spotify_env_from_file():
                 # stop at the first file found
                 return out
         except Exception:
-            # do not crash on malformed lines
+            # ignore parse errors; we'll just return what we have
             pass
     return out
 
@@ -237,36 +236,25 @@ class App(tk.Tk):
             env = os.environ.copy()
             env['PATH'] = os.pathsep.join([ffmpeg_dir, str(exe.parent), env.get('PATH', '')])
 
-            # inject Spotify creds (force from spotdl.env if present)
-            spot_env = _load_spotify_env_from_file()
-            for k in ('SPOTIPY_CLIENT_ID', 'SPOTIPY_CLIENT_SECRET', 'SPOTIPY_REDIRECT_URI'):
-                if k in spot_env:
-                    env[k] = spot_env[k]
+          # inject Spotify creds (force from spotdl.env/.env if present)
+spot_env = _load_spotify_env_from_file()
+for k in ('SPOTIPY_CLIENT_ID', 'SPOTIPY_CLIENT_SECRET', 'SPOTIPY_REDIRECT_URI'):
+    if k in spot_env:
+        env[k] = spot_env[k]
 
-            # --- Masked logging for verification ---
-            self.log('Running: ' + ' '.join(cmd))
-            try:
-                client_id = env.get('SPOTIPY_CLIENT_ID')
-                client_secret = env.get('SPOTIPY_CLIENT_SECRET')
-                redirect = env.get('SPOTIPY_REDIRECT_URI')
-                self.log('SPOTIPY_CLIENT_ID = ' + self._mask(client_id))
-                self.log('SPOTIPY_CLIENT_SECRET = ' + ('present' if client_secret else '<missing>'))
-                self.log('SPOTIPY_REDIRECT_URI = ' + (redirect or '<missing>'))
-            except Exception as e:
-                self.log('Env-log failed: ' + str(e))
+# show the command
+self.log('Running: ' + ' '.join(cmd))
 
-            self.status.configure(text='Downloading...')
+# masked confirmation
+def _mask(v):
+    if not v:
+        return '<missing>'
+    v = str(v)
+    return (v[:3] + '...' + v[-3:]) if len(v) > 6 else (v[0] + '***' + v[-1])
 
-            creationflags = 0x08000000 if IS_WINDOWS else 0  # CREATE_NO_WINDOW on Windows
-            self.proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=env,
-                cwd=str(APP_DIR),
-                text=True,
-                creationflags=creationflags
-            )
+self.log('SPOTIPY_CLIENT_ID = ' + _mask(env.get('SPOTIPY_CLIENT_ID')))
+self.log('SPOTIPY_CLIENT_SECRET = ' + ('present' if env.get('SPOTIPY_CLIENT_SECRET') else '<missing>'))
+self.log('SPOTIPY_REDIRECT_URI = ' + (env.get('SPOTIPY_REDIRECT_URI') or '<missing>'))
 
             # stream output
             for line in self.proc.stdout:  # type: ignore[union-attr]
